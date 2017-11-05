@@ -1,0 +1,20 @@
+$Module esiextra 3 Varnish Esiextra Module
+
+DESCRIPTION
+===========
+
+Example
+    ::
+
+        import esiextra;
+
+$Function VOID bodyhash(HEADER)
+
+Hash the received body.
+
+SEE ALSO
+========
+
+``vcl``\(7),
+``varnishd``\(1),
+``varnishesiextra``\(1)
