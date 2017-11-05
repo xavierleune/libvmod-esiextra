@@ -12,6 +12,20 @@ $Function VOID bodyhash(HEADER)
 
 Hash the received body.
 
+$Object lm()
+$Method BOOL .inspect(TIME)
+
+Inspect time vs. saved time. If new time is after saved time, update
+and return true. Otherwise return false.
+
+$Method VOID .update(TIME)
+
+same as inspect without a return value.
+
+$Method TIME .get()
+
+get the saved time.
+
 SEE ALSO
 ========
 

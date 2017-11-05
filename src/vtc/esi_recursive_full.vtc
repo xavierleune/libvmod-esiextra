@@ -2,7 +2,9 @@ varnishtest "Test resp_top.* in an ESI context"
 
 server s1 {
 	rxreq
-	txresp -body {
+	txresp \
+	-hdr "Last-Modified: Thu, 02 Nov 2017 18:38:02 GMT" \
+	-body {
 		<html>
 		Before include
 		<esi:include src="/a"/>
@@ -13,37 +15,45 @@ server s1 {
 
 	rxreq
 	expect req.url == "/a1"
-	txresp -body {
+	txresp \
+	-hdr "Last-Modified: Fri, 03 Nov 2017 18:38:03 GMT" \
+	-body {
 		Included file
 		<esi:include src="/c"/>
 	}
 
 	rxreq
 	expect req.url == "/c2"
-	txresp
+	txresp \
+	-hdr "Last-Modified: Sat, 04 Nov 2017 18:38:04 GMT" \
+	-body { c}
 
 	rxreq
 	expect req.url == "/b1"
-	txresp
+	txresp \
+	-hdr "Last-Modified: Sun, 05 Nov 2017 18:38:05 GMT" \
+	-body { b}
+
+	rxreq
+	expect req.url == "/noinclude"
+	txresp \
+	-hdr "Last-Modified: Fri, 03 Nov 2017 18:38:04 GMT" \
+	-body {<html></html>}
 } -start
 
-varnish v1 -vcl+backend {} -start
+varnish v1 -arg "-p feature=+esi_disable_xml_check" -vcl+backend {} -start
 
 varnish v1 -vcl+backend {
+	import esiextra;
+	import std;
+
 	backend recursive {
 	    .host = "${v1_addr}";
 	    .port = "${v1_port}";
 	}
 
-	sub recv_test_runtime_access {
-	    if (req.url == "/level0readrecv") {
-		set req.http.foo = resp_top.http.foo;
-		return (synth(200));
-	    }
-	    if (req.url == "/level0writerecv") {
-		set resp_top.http.foo = req.http.foo;
-		return (synth(200));
-	    }
+	sub vcl_init {
+	    new esilm = esiextra.lm();
 	}
 	sub vcl_recv {
 	    if (req.restarts == 0) {
@@ -55,13 +65,13 @@ varnish v1 -vcl+backend {
 		return (hash);
 	    }
 
-	    call recv_test_runtime_access;
-
 	    if (req.http.X-Do-Recurse) {
-		set req.hash_ignore_busy = true;
 		set req.backend_hint = recursive;
+		set req.esi = false;
 	    }
-
+	    if (req.http.X-Recursive) {
+		set req.hash_ignore_busy = true;
+	    }
 	    if (req.http.TE == "trailers" || req.http.TEFAIL) {
 		# We vary on X-TE to differenciate pre-rendered ESI
 		# output with trailers
@@ -85,14 +95,26 @@ varnish v1 -vcl+backend {
 	    } else {
 		set resp_top.http.X-ESI = req.url;
 	    }
+	    # updating for level > 1 would just be a waste, only the
+	    # last update wins anyway
+	    if (req.esi_level == 1) {
+		if (esilm.inspect(std.time(resp.http.Last-Modified,
+		  now - 10s))) {
+		    set resp_top.http.Last-Modified = esilm.get();
+		}
+	    } else {
+		esilm.update(std.time(resp.http.Last-Modified, now - 10s));
+	    }
 	    return (deliver);
 	}
 	sub vcl_deliver {
 	    if (req.esi_level > 0) {
 		call deliver_esi;
 	    }
+	    esilm.update(std.time(resp.http.Last-Modified, now - 10s));
 	    if (req.http.TE == "trailers") {
-		set resp.http.Trailer = "X-ESI";
+		set resp.http.Trailer = "X-ESI, Last-Modified";
+		set resp.http.X-ESI = req.url;
 	    }
 	    unset resp.http.Vary;
 	    if (resp.http.hits) {
@@ -110,12 +132,20 @@ varnish v1 -vcl+backend {
 	    }
 	}
 	sub vcl_backend_response {
-	    set beresp.do_esi = true;
-	    set beresp.http.Vary = "X-TE";
 	    if (bereq.http.X-Do-Recurse) {
 		# The recursively fetched Variant has all the headers
 		unset bereq.http.X-TE;
+		unset beresp.http.ETag;
+		esiextra.bodyhash(beresp.http.ETag);
+		if (beresp.http.Trailer) {
+		    set beresp.http.Trailer = beresp.http.Trailer +
+		      ", ETag";
+		} else {
+		    set beresp.http.Trailer = "ETag";
+		}
 	    }
+	    set beresp.do_esi = true;
+	    set beresp.http.Vary = "X-TE";
 	}
 }
 
@@ -125,32 +155,23 @@ logexpect l1 -v v1 -g raw {
 } -start
 
 client c1 {
-	txreq -url "/level0readrecv"
-	rxresp
-	expect resp.status == 503
-	expect resp.reason == "VCL failed"
-} -run
-client c1 {
-	txreq -url "/level0writerecv"
-	rxresp
-	expect resp.status == 503
-	expect resp.reason == "VCL failed"
-} -run
-client c1 {
 	txreq -hdr "TE: trailers"
 	rxresp
 	expect resp.status == 200
-	expect resp.bodylen == 81
-	expect resp.http.Trailer == "X-ESI"
-	expect resp.http.X-ESI == "/a1:/c2:/b1"
+	expect resp.bodylen == 85
+	expect resp.http.Trailer == "X-ESI, Last-Modified"
+	expect resp.http.X-ESI == "/:/a1:/c2:/b1"
+	expect resp.http.Last-Modified == "Sun, 05 Nov 2017 18:38:05 GMT"
 	expect resp.http.hits == "0"
 
 	txreq
 	rxresp
 	expect resp.status == 200
-	expect resp.bodylen == 81
+	expect resp.bodylen == 85
 	expect resp.http.Trailer == <undef>
-	expect resp.http.X-ESI == "/a1:/c2:/b1"
+	expect resp.http.X-ESI == "/:/a1:/c2:/b1"
+	expect resp.http.Last-Modified == "Sun, 05 Nov 2017 18:38:05 GMT"
+	expect resp.http.ETag == {"8fd5e543966b9d8c767b0eab658adcccddfe73a8f5bf3815dead2da979339024"}
 	expect resp.http.hits == "1,0"
 
 	# this fails at esi level 1 - body contains "503 VCL failed"
@@ -165,11 +186,23 @@ client c1 {
 	txreq
 	rxresp
 	expect resp.status == 200
-	expect resp.bodylen == 81
+	expect resp.bodylen == 85
 	expect resp.http.Trailer == <undef>
-	expect resp.http.X-ESI == "/a1:/c2:/b1"
+	expect resp.http.X-ESI == "/:/a1:/c2:/b1"
+	expect resp.http.Last-Modified == "Sun, 05 Nov 2017 18:38:05 GMT"
+	expect resp.http.ETag == {"8fd5e543966b9d8c767b0eab658adcccddfe73a8f5bf3815dead2da979339024"}
 	expect resp.http.hits == "1,1"
-} -run
 
+	# no esi include
+	txreq -url "/noinclude"
+	rxresp
+	expect resp.status == 200
+	expect resp.bodylen == 13
+	expect resp.http.Trailer == <undef>
+	expect resp.http.X-ESI == "/noinclude"
+	expect resp.http.Last-Modified == "Fri, 03 Nov 2017 18:38:04 GMT"
+	expect resp.http.ETag == {"b633a587c652d02386c4f16f8c6f6aab7352d97f16367c3c40576214372dd628"}
+	expect resp.http.hits == "0,0"
+} -run
 varnish v1 -expect esi_errors == 0
 logexpect l1 -wait
