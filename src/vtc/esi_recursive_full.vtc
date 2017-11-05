@@ -1,0 +1,175 @@
+varnishtest "Test resp_top.* in an ESI context"
+
+server s1 {
+	rxreq
+	txresp -body {
+		<html>
+		Before include
+		<esi:include src="/a"/>
+		<esi:include src="/b"/>
+		After include
+		</html>
+	}
+
+	rxreq
+	expect req.url == "/a1"
+	txresp -body {
+		Included file
+		<esi:include src="/c"/>
+	}
+
+	rxreq
+	expect req.url == "/c2"
+	txresp
+
+	rxreq
+	expect req.url == "/b1"
+	txresp
+} -start
+
+varnish v1 -vcl+backend {} -start
+
+varnish v1 -vcl+backend {
+	backend recursive {
+	    .host = "${v1_addr}";
+	    .port = "${v1_port}";
+	}
+
+	sub recv_test_runtime_access {
+	    if (req.url == "/level0readrecv") {
+		set req.http.foo = resp_top.http.foo;
+		return (synth(200));
+	    }
+	    if (req.url == "/level0writerecv") {
+		set resp_top.http.foo = req.http.foo;
+		return (synth(200));
+	    }
+	}
+	sub vcl_recv {
+	    if (req.restarts == 0) {
+		unset req.http.X-Do-Recurse;
+	    }
+	    if (req.esi_level > 0) {
+		set req.url = req.url + req.esi_level;
+		set req.http.X-TE = "trailers";
+		return (hash);
+	    }
+
+	    call recv_test_runtime_access;
+
+	    if (req.http.X-Do-Recurse) {
+		set req.hash_ignore_busy = true;
+		set req.backend_hint = recursive;
+	    }
+
+	    if (req.http.TE == "trailers" || req.http.TEFAIL) {
+		# We vary on X-TE to differenciate pre-rendered ESI
+		# output with trailers
+		set req.http.X-TE = "trailers";
+	    } else {
+		unset req.http.X-TE;
+	    }
+	}
+	sub vcl_miss {
+	    if (req.esi_level == 0 &&
+	      ! req.http.TE &&
+	      ! req.http.X-Do-Recurse &&
+	      ! req.http.X-Recursive) {
+		set req.http.X-Do-Recurse = "1";
+		return(restart);
+	    }
+	}
+	sub deliver_esi {
+	    if (resp_top.http.X-ESI) {
+		set resp_top.http.X-ESI = resp_top.http.X-ESI + ":" + req.url;
+	    } else {
+		set resp_top.http.X-ESI = req.url;
+	    }
+	    return (deliver);
+	}
+	sub vcl_deliver {
+	    if (req.esi_level > 0) {
+		call deliver_esi;
+	    }
+	    if (req.http.TE == "trailers") {
+		set resp.http.Trailer = "X-ESI";
+	    }
+	    unset resp.http.Vary;
+	    if (resp.http.hits) {
+		set resp.http.hits = resp.http.hits + "," + obj.hits;
+	    } else {
+		set resp.http.hits = obj.hits;
+	    }
+	}
+	sub vcl_backend_fetch {
+	    if (bereq.http.X-Do-Recurse) {
+		set bereq.http.X-Recursive = "1";
+		# TE does not get copied to the backend side, but X-TE
+		# (varied upon) does
+		set bereq.http.TE = "trailers";
+	    }
+	}
+	sub vcl_backend_response {
+	    set beresp.do_esi = true;
+	    set beresp.http.Vary = "X-TE";
+	    if (bereq.http.X-Do-Recurse) {
+		# The recursively fetched Variant has all the headers
+		unset bereq.http.X-TE;
+	    }
+	}
+}
+
+logexpect l1 -v v1 -g raw {
+# TEFAIL
+#	expect * * VCL_Error {^resp_top.http.X-ESI not writable unless sending Trailers$}
+} -start
+
+client c1 {
+	txreq -url "/level0readrecv"
+	rxresp
+	expect resp.status == 503
+	expect resp.reason == "VCL failed"
+} -run
+client c1 {
+	txreq -url "/level0writerecv"
+	rxresp
+	expect resp.status == 503
+	expect resp.reason == "VCL failed"
+} -run
+client c1 {
+	txreq -hdr "TE: trailers"
+	rxresp
+	expect resp.status == 200
+	expect resp.bodylen == 81
+	expect resp.http.Trailer == "X-ESI"
+	expect resp.http.X-ESI == "/a1:/c2:/b1"
+	expect resp.http.hits == "0"
+
+	txreq
+	rxresp
+	expect resp.status == 200
+	expect resp.bodylen == 81
+	expect resp.http.Trailer == <undef>
+	expect resp.http.X-ESI == "/a1:/c2:/b1"
+	expect resp.http.hits == "1,0"
+
+	# this fails at esi level 1 - body contains "503 VCL failed"
+	# pretending to support TE, but don't
+	txreq -hdr "TEFAIL: 1"
+	rxresp
+	expect resp.status == 200
+	expect resp.http.X-ESI == <undef>
+	expect resp.bodylen == 562
+
+	# hit the prepared object again
+	txreq
+	rxresp
+	expect resp.status == 200
+	expect resp.bodylen == 81
+	expect resp.http.Trailer == <undef>
+	expect resp.http.X-ESI == "/a1:/c2:/b1"
+	expect resp.http.hits == "1,1"
+} -run
+
+varnish v1 -expect esi_errors == 0
+logexpect l1 -wait

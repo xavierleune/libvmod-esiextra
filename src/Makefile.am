@@ -27,7 +27,8 @@ AM_VTC_LOG_FLAGS = \
 	-p vmod_path="$(abs_builddir)/.libs:$(vmoddir)"
 
 TESTS = \
-	vtc/vmod_esiextra.vtc
+	vtc/vmod_esiextra.vtc \
+	vtc/esi_recursive_full.vtc
 
 # Documentation
 
