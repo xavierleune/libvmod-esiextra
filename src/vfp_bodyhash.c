@@ -20,9 +20,9 @@ struct bodyhash {
 	unsigned		magic;
 #define BODYHASH_MAGIC		0xb0d16a56
 
-	struct SHA256Context	sha256ctx;
+	struct VSHA256Context	sha256ctx;
 	char			*hdr;
-	// unsigned char	hash[SHA256_LEN];
+	// unsigned char	hash[VSHA256_LEN];
 };
 
 const char placeholder[] = "\"vmod-esiextra magic placeholder "	\
@@ -39,13 +39,13 @@ vfp_bodyhash_init(struct vfp_ctx *vc, struct vfp_entry *vfe)
 
 	AN(vfe->priv1);
 	assert(vfe->vfp == &VFP_bodyhash);
-	assert(placeholder_l == SHA256_LEN * 2 + 2);
+	assert(placeholder_l == VSHA256_LEN * 2 + 2);
 
 	// XXX workspace
 	ALLOC_OBJ(bh, BODYHASH_MAGIC);
 	if (bh == NULL)
 		return (VFP_ERROR);
-	SHA256_Init(&bh->sha256ctx);
+	VSHA256_Init(&bh->sha256ctx);
 	bh->hdr = vfe->priv1;
 
 	vfe->priv1 = bh;
@@ -69,7 +69,7 @@ vfp_bodyhash_pull(struct vfp_ctx *vc, struct vfp_entry *vfe, void *p,
 
 	CHECK_OBJ_NOTNULL(vfe, VFP_ENTRY_MAGIC);
 	CAST_OBJ_NOTNULL(bh, vfe->priv1, BODYHASH_MAGIC);
-	SHA256_Update(&bh->sha256ctx, p, *lp);
+	VSHA256_Update(&bh->sha256ctx, p, *lp);
 	return (vp);
 }
 
@@ -82,7 +82,7 @@ static void __match_proto__(vfp_fini_f)
 vfp_bodyhash_fini(struct vfp_ctx *vc, struct vfp_entry *vfe)
 {
 	struct bodyhash *bh;
-	unsigned char	sha[SHA256_LEN];
+	unsigned char	sha[VSHA256_LEN];
 	char		*etag, *p;
 	int		i;
 	ssize_t		l;
@@ -123,12 +123,12 @@ vfp_bodyhash_fini(struct vfp_ctx *vc, struct vfp_entry *vfe)
 		goto out;
 	}
 
-	SHA256_Final(sha, &bh->sha256ctx);
+	VSHA256_Final(sha, &bh->sha256ctx);
 
 	assert(*etag == '"');
 	p = etag;
 	p++;
-	for (i = 0; i < SHA256_LEN; i++) {
+	for (i = 0; i < VSHA256_LEN; i++) {
 		*p++ = hexe[(sha[i] & 0xf0) >> 4];
 		*p++ = hexe[sha[i] & 0x0f];
 	}
