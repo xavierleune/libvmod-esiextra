@@ -83,6 +83,8 @@ vfp_bodyhash_fini(struct vfp_ctx *vc, struct vfp_entry *vfe)
 {
 	struct bodyhash *bh;
 	unsigned char	sha[VSHA256_LEN];
+	const ssize_t	hexl = VSHA256_LEN * 2 + 3;
+	char		hex[hexl];
 	char		*etag, *p;
 	int		i;
 	ssize_t		l;
@@ -95,6 +97,23 @@ vfp_bodyhash_fini(struct vfp_ctx *vc, struct vfp_entry *vfe)
 
 	CAST_OBJ_NOTNULL(bh, vfe->priv1, BODYHASH_MAGIC);
 	vfe->priv1 = NULL;
+
+	VSHA256_Final(sha, &bh->sha256ctx);
+
+	p = hex;
+	*p++ = '"';
+	for (i = 0; i < VSHA256_LEN; i++) {
+		*p++ = hexe[(sha[i] & 0xf0) >> 4];
+		*p++ = hexe[sha[i] & 0x0f];
+	}
+	*p++ = '"';
+	*p++ = '\0';
+	assert(pdiff(hex, p) == hexl);
+
+	if (vc->resp && vc->resp->thd) {
+		http_ForceHeader(vc->resp, H_ETag, hex);
+		goto out;
+	}
 
 	// HACKY
 	p = TRUST_ME(ObjGetAttr(vc->wrk, vc->oc, OA_HEADERS, &l));
@@ -123,16 +142,9 @@ vfp_bodyhash_fini(struct vfp_ctx *vc, struct vfp_entry *vfe)
 		goto out;
 	}
 
-	VSHA256_Final(sha, &bh->sha256ctx);
 
 	assert(*etag == '"');
-	p = etag;
-	p++;
-	for (i = 0; i < VSHA256_LEN; i++) {
-		*p++ = hexe[(sha[i] & 0xf0) >> 4];
-		*p++ = hexe[sha[i] & 0x0f];
-	}
-	assert(*p == '"');
+	memcpy(etag, hex, hexl);
 
   out:
 	FREE_OBJ(bh);
