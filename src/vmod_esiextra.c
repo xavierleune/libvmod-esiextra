@@ -55,6 +55,7 @@ vmod_bodyhash(VRT_CTX, VCL_HEADER hdr)
 	}
 
 	CAST_OBJ_NOTNULL(bo, ctx->bo, BUSYOBJ_MAGIC);
+	// XXX can leave streaming enabled with Trailer support
 	bo->do_stream = 0;
 	if (Bodyhash_push(bo->vfc, hdr->what) == NULL)
 		VRT_fail(ctx, "bodyhash push failed");
