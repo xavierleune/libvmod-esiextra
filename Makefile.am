@@ -4,4 +4,4 @@ DISTCHECK_CONFIGURE_FLAGS = RST2MAN=:
 
 SUBDIRS = src
 
-EXTRA_DIST = libvmod-esiextra.spec
+EXTRA_DIST = libvmod-esiextra.spec LICENSE

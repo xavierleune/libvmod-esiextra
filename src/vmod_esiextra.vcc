@@ -1,3 +1,12 @@
+#-
+# Copyright 2017 UPLEX Nils Goroll Systemoptimierung
+# All rights reserved
+#
+# Author: Nils Goroll <nils.goroll@uplex.de>
+#
+# License: See the LICENSE file which should have come with this distribution
+#
+
 $Module esiextra 3 Varnish Esiextra Module
 
 DESCRIPTION
