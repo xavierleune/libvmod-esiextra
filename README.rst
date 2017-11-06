@@ -30,8 +30,8 @@ DESCRIPTION
 This vmod contains tools to improve varnish ESI processing
 capabilities like:
 
-* generate `ETag` backend response headers
-* track the most recent `Last-Modified` date of all ESI includes.
+* generate ``ETag`` backend response headers
+* track the most recent ``Last-Modified`` date of all ESI includes.
 
 It requires chunked encoding trailer support, which, as of 2017-11-06,
 has not been merged to varnish-cache. See
@@ -43,7 +43,7 @@ Example
 	import esiextra;
 	# TODO
 
-See file `vtc/esi_recursive_full.vtc` for a full blown usage example.
+See file ``vtc/esi_recursive_full.vtc`` for a full blown usage example.
 
 CONTENTS
 ========
@@ -62,10 +62,10 @@ bodyhash
 
 Hash the received body and write a hex-encoded string into HEADER.
 
-This function may only be called in `vcl_backend_response{}` and can
-only change `beresp.http.*` headers.
+This function may only be called in ``vcl_backend_response{}`` and can
+only change ``beresp.http.*`` headers.
 
-If Trailer support is enabled, by setting `beresp.http.Trailer` to
+If Trailer support is enabled, by setting ``beresp.http.Trailer`` to
 contain the name of HEADER, it will be used.
 
 Otherwise a placeholder header will be added to the cache object and
@@ -84,7 +84,7 @@ lm
 
 	new OBJ = lm()
 
-Create an object to track the most reacent `Last-Modified` time during
+Create an object to track the most reacent ``Last-Modified`` time during
 the entirity of an ESI request including all sub-requests.
 
 .. _func_lm.inspect:
