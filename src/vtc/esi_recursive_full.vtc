@@ -59,17 +59,10 @@ varnish v1 -vcl+backend {
 	    call esiextra_init;
 	}
 	sub esiextra_recv {
-	    if (req.restarts == 0) {
-		unset req.http.X-Do-Recurse;
-	    }
 	    if (req.esi_level > 0) {
 		set req.http.X-TE = "trailers";
 	    } else {
 		# esi level == 0
-		if (req.http.X-Do-Recurse) {
-		    set req.backend_hint = recursive;
-		    set req.esi = false;
-		}
 		if (req.http.X-Recursive) {
 		    set req.hash_ignore_busy = true;
 		}
@@ -91,9 +84,10 @@ varnish v1 -vcl+backend {
 	sub esiextra_miss {
 	    if (req.esi_level == 0 &&
 	      ! req.http.TE &&
-	      ! req.http.X-Do-Recurse &&
+	      ! (req.backend_hint == recursive) &&
 	      ! req.http.X-Recursive) {
-		set req.http.X-Do-Recurse = "1";
+		set req.backend_hint = recursive;
+		set req.esi = false;
 		return(restart);
 	    }
 	}
@@ -159,7 +153,7 @@ varnish v1 -vcl+backend {
 	    }
 	}
 	sub esiextra_backend_fetch {
-	    if (bereq.http.X-Do-Recurse) {
+	    if (bereq.backend == recursive) {
 		set bereq.http.X-Recursive = "1";
 		# TE does not get copied to the backend side, but X-TE
 		# (varied upon) does
@@ -170,7 +164,7 @@ varnish v1 -vcl+backend {
 	    call esiextra_backend_fetch;
 	}
 	sub esiextra_backend_response {
-	    if (bereq.http.X-Do-Recurse) {
+	    if (bereq.backend == recursive) {
 		# The recursively fetched Variant has all the headers
 		unset bereq.http.X-TE;
 		unset beresp.http.ETag;
