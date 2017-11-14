@@ -52,35 +52,43 @@ varnish v1 -vcl+backend {
 	    .port = "${v1_port}";
 	}
 
-	sub vcl_init {
+	sub esiextra_init {
 	    new esilm = esiextra.lm();
 	}
-	sub vcl_recv {
+	sub vcl_init {
+	    call esiextra_init;
+	}
+	sub esiextra_recv {
 	    if (req.restarts == 0) {
 		unset req.http.X-Do-Recurse;
 	    }
 	    if (req.esi_level > 0) {
-		set req.url = req.url + req.esi_level;
-		set req.http.X-TE = "trailers";
-		return (hash);
-	    }
-
-	    if (req.http.X-Do-Recurse) {
-		set req.backend_hint = recursive;
-		set req.esi = false;
-	    }
-	    if (req.http.X-Recursive) {
-		set req.hash_ignore_busy = true;
-	    }
-	    if (req.http.TE == "trailers" || req.http.TEFAIL) {
-		# We vary on X-TE to differenciate pre-rendered ESI
-		# output with trailers
 		set req.http.X-TE = "trailers";
 	    } else {
-		unset req.http.X-TE;
+		# esi level == 0
+		if (req.http.X-Do-Recurse) {
+		    set req.backend_hint = recursive;
+		    set req.esi = false;
+		}
+		if (req.http.X-Recursive) {
+		    set req.hash_ignore_busy = true;
+		}
+		if (req.http.TE == "trailers" || req.http.TEFAIL) {
+		    # We vary on X-TE to differenciate pre-rendered ESI
+		    # output with trailers
+		    set req.http.X-TE = "trailers";
+		} else {
+		    unset req.http.X-TE;
+		}
 	    }
 	}
-	sub vcl_miss {
+	sub vcl_recv {
+	    if (req.esi_level > 0) {
+		set req.url = req.url + req.esi_level;
+	    }
+	    call esiextra_recv;
+	}
+	sub esiextra_miss {
 	    if (req.esi_level == 0 &&
 	      ! req.http.TE &&
 	      ! req.http.X-Do-Recurse &&
@@ -89,41 +97,68 @@ varnish v1 -vcl+backend {
 		return(restart);
 	    }
 	}
+	sub vcl_miss {
+	    call esiextra_miss;
+	}
+	# to be called from esi_level > 0
+	sub esiextra_deliver_esi {
+	    # updating for level > 1 would just be a waste, only the
+	    # last update wins anyway
+	    if (req.esi_level == 1) {
+		if (esilm.inspect(std.time(resp.http.Last-Modified,
+					   now - 10s))) {
+		    set resp_top.http.Last-Modified = esilm.get();
+		}
+	    } else {
+		esilm.update(std.time(resp.http.Last-Modified, now - 10s));
+	    }
+	}
+	# to be called from esi_level == 0
+	sub esiextra_deliver {
+	    esilm.update(std.time(resp.http.Last-Modified, now - 10s));
+	    if (req.http.TE == "trailers") {
+		set resp.http.Trailer = "Last-Modified";
+	    }
+	    # no vmod_re
+	    if (! resp.http.Vary) {
+		#
+	    } else if (resp.http.Vary ~ "^\s*TE\s*$") {
+		unset resp.http.Vary;
+	    } else if (resp.http.Vary ~ "\bTE\s*,\s*") {
+		set resp.http.Vary = regsub(resp.http.Vary, "\bTE\s*,\s*", "");
+	    } else if (resp.http.Vary ~ "\s*,\s*TE\b") {
+		set resp.http.Vary = regsub(resp.http.Vary, "\s*,\s*TE\b", "");
+	    }
+	}
 	sub deliver_esi {
 	    if (resp_top.http.X-ESI) {
 		set resp_top.http.X-ESI = resp_top.http.X-ESI + ":" + req.url;
 	    } else {
 		set resp_top.http.X-ESI = req.url;
 	    }
-	    # updating for level > 1 would just be a waste, only the
-	    # last update wins anyway
-	    if (req.esi_level == 1) {
-		if (esilm.inspect(std.time(resp.http.Last-Modified,
-		  now - 10s))) {
-		    set resp_top.http.Last-Modified = esilm.get();
-		}
-	    } else {
-		esilm.update(std.time(resp.http.Last-Modified, now - 10s));
-	    }
+	    call esiextra_deliver_esi;
 	    return (deliver);
 	}
 	sub vcl_deliver {
 	    if (req.esi_level > 0) {
 		call deliver_esi;
 	    }
-	    esilm.update(std.time(resp.http.Last-Modified, now - 10s));
+	    call esiextra_deliver;
 	    if (req.http.TE == "trailers") {
-		set resp.http.Trailer = "X-ESI, Last-Modified";
+		if (resp.http.Trailer) {
+		    set resp.http.Trailer = "X-ESI, " + resp.http.Trailer;
+		} else {
+		    set resp.http.Trailer = "X-ESI";
+		}
 		set resp.http.X-ESI = req.url;
 	    }
-	    unset resp.http.Vary;
 	    if (resp.http.hits) {
 		set resp.http.hits = resp.http.hits + "," + obj.hits;
 	    } else {
 		set resp.http.hits = obj.hits;
 	    }
 	}
-	sub vcl_backend_fetch {
+	sub esiextra_backend_fetch {
 	    if (bereq.http.X-Do-Recurse) {
 		set bereq.http.X-Recursive = "1";
 		# TE does not get copied to the backend side, but X-TE
@@ -131,7 +166,10 @@ varnish v1 -vcl+backend {
 		set bereq.http.TE = "trailers";
 	    }
 	}
-	sub vcl_backend_response {
+	sub vcl_backend_fetch {
+	    call esiextra_backend_fetch;
+	}
+	sub esiextra_backend_response {
 	    if (bereq.http.X-Do-Recurse) {
 		# The recursively fetched Variant has all the headers
 		unset bereq.http.X-TE;
@@ -143,9 +181,13 @@ varnish v1 -vcl+backend {
 		} else {
 		    set beresp.http.Trailer = "ETag";
 		}
+		return (deliver);
 	    }
-	    set beresp.do_esi = true;
 	    set beresp.http.Vary = "X-TE";
+	}
+	sub vcl_backend_response {
+	    call esiextra_backend_response;
+	    set beresp.do_esi = true;
 	}
 }
 
