@@ -39,9 +39,15 @@ server s1 {
 	txresp \
 	-hdr "Last-Modified: Fri, 03 Nov 2017 18:38:04 GMT" \
 	-body {<html></html>}
+
+	rxreq
+	expect req.url == "/nobody"
+	txresp -status 302 -body {}
 } -start
 
-varnish v1 -arg "-p feature=+esi_disable_xml_check" -vcl+backend {} -start
+varnish v1 -arg "-p feature=+esi_disable_xml_check" \
+	   -arg "-p debug=+syncvsl" \
+	   -vcl+backend {} -start
 
 varnish v1 -vcl+backend {
 	import esiextra;
@@ -175,6 +181,7 @@ varnish v1 -vcl+backend {
 		} else {
 		    set beresp.http.Trailer = "ETag";
 		}
+		std.fetch_body(deliver);
 		return (deliver);
 	    }
 	    set beresp.http.Vary = "X-TE";
@@ -238,6 +245,17 @@ client c1 {
 	expect resp.http.X-ESI == "/noinclude"
 	expect resp.http.Last-Modified == "Fri, 03 Nov 2017 18:38:04 GMT"
 	expect resp.http.ETag == {"b633a587c652d02386c4f16f8c6f6aab7352d97f16367c3c40576214372dd628"}
+	expect resp.http.hits == "0,0"
+
+	# response with no body
+	txreq -url "/nobody"
+	rxresp
+	expect resp.status == 302
+	expect resp.bodylen == 0
+	expect resp.http.Trailer == <undef>
+	expect resp.http.X-ESI == "/nobody"
+	expect resp.http.Last-Modified == <undef>
+	expect resp.http.ETag == {"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
 	expect resp.http.hits == "0,0"
 } -run
 varnish v1 -expect esi_errors == 0

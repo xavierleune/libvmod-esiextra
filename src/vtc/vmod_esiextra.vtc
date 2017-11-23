@@ -24,10 +24,12 @@ server s1 {
 
 
 varnish v1 -vcl+backend {
+	import std;
 	import esiextra;
 
 	sub vcl_backend_response {
 	    esiextra.bodyhash(beresp.http.ETag);
+	    std.fetch_body(deliver);
 	}
 } -start
 

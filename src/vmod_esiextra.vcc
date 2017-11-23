@@ -18,9 +18,9 @@ capabilities like:
 * generate ``ETag`` backend response headers
 * track the most recent ``Last-Modified`` date of all ESI includes.
 
-It requires chunked encoding trailer support, which, as of 2017-11-06,
+It requires chunked encoding trailer support, which, as of 2017-11-23,
 has not been merged to varnish-cache. See
-https://github.com/varnishcache/varnish-cache/pull/2477
+https://github.com/nigoroll/varnish-cache/pull/6
 
 Example
     ::

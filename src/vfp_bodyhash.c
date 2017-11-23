@@ -132,7 +132,7 @@ vfp_bodyhash_fini(struct vfp_ctx *vc, struct vfp_entry *vfe)
 	*p++ = '\0';
 	assert(pdiff(hex, p) == hexl);
 
-	if (vc->resp && vc->resp->thd) {
+	if (vc->resp) {
 		http_ForceHeader(vc->resp, H_ETag, hex);
 		goto out;
 	}
