@@ -2,9 +2,11 @@ varnishtest "Generate an ETag as the hash of the received body"
 
 server s1 {
 	rxreq
+	expect req.url == "/"
 	txresp -body "foo"
 
 	rxreq
+	expect req.url == "/chunked"
 	txresp -nolen -hdr "Transfer-encoding: chunked"
 	chunked {f}
 	delay .2
@@ -12,6 +14,11 @@ server s1 {
 	delay .2
 	chunked {o}
 	delay .2
+	chunkedlen 0
+
+	rxreq
+	expect req.url == "/zero"
+	txresp -nolen -hdr "Transfer-encoding: chunked"
 	chunkedlen 0
 } -start
 
@@ -34,4 +41,10 @@ client c1 -repeat 3 {
 	txreq -url "/chunked"
 	rxresp
 	expect resp.http.ETag == {"2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"}
+} -run
+
+client c1 -repeat 3 {
+	txreq -url "/zero"
+	rxresp
+	expect resp.http.ETag == {"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
 } -run
